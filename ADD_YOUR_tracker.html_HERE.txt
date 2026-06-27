@@ -1,1 +1,0 @@
-Copy your tracker.html here (from your trade-tracker.zip build), then delete this file. It's the tracker UI and is served at the repo root on GitHub Pages.
