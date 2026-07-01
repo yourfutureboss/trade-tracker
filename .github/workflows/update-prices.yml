@@ -1,10 +1,13 @@
-name: update-prices        # ← whatever yours is called, keep it
+name: Daily prices
+
 on:
   schedule:
+    # 22:00 UTC Mon–Fri, after the 4 PM ET close.
+    # GitHub schedules are best-effort and can run late.
     - cron: "0 22 * * 1-5"
-  workflow_dispatch:
+  workflow_dispatch: {}
 
-permissions:              # ← insertion 1, before jobs:
+permissions:
   contents: read
   issues: write
 
@@ -12,12 +15,27 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      # ...your existing checkout / python / update_prices steps stay as-is...
+      - uses: actions/checkout@v4
 
-      - name: Check triggers and alert     # ← insertion 2, last step
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch and upsert prices
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python update_prices.py
+
+      - name: Check triggers and alert
         if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python check_triggers.py
