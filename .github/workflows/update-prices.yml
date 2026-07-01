@@ -1,35 +1,23 @@
-name: update-prices
-
-# Runs the price fetcher on a schedule and writes marks to Supabase.
-# Trigger it by hand from the Actions tab via "Run workflow" to test immediately.
+name: update-prices        # ← whatever yours is called, keep it
 on:
   schedule:
-    - cron: "0 22 * * 1-5"   # 22:00 UTC, Mon–Fri (note: UTC, not local time)
-  workflow_dispatch: {}
+    - cron: "0 22 * * 1-5"
+  workflow_dispatch:
 
-permissions:
+permissions:              # ← insertion 1, before jobs:
   contents: read
+  issues: write
 
 jobs:
-  fetch:
+  update:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
+      # ...your existing checkout / python / update_prices steps stay as-is...
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        # At minimum the script needs requests. If update_prices.py also imports
-        # pandas / pandas-datareader (common for pulling Stooq), add them here:
-        #   run: pip install requests pandas pandas-datareader
-        run: pip install requests
-
-      - name: Fetch prices and upsert to Supabase
+      - name: Check triggers and alert     # ← insertion 2, last step
+        if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python update_prices.py
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python check_triggers.py
