@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-"""backfill_prices.py - fill price_marks gaps from Stooq daily history.
+"""backfill_prices.py - fill price_marks gaps with daily closes.
+
+Source: Yahoo v8 chart API (keyless, UA header required). Stooq's history
+endpoint (/q/d/l/) now 404s from GitHub-runner IPs for every symbol - see
+issue #2 - and its latest-quote endpoint returns N/D there too.
 
 Range via env START/END (YYYY-MM-DD). Existing (ticker, mark_date) rows are
-left untouched: Prefer resolution=ignore-duplicates. Run server-side only
-(GitHub Actions) - service key required.
+left untouched: Prefer resolution=ignore-duplicates. Server-side only.
 """
-import os, io, csv, sys, datetime as dt, requests
+import os, sys, time, datetime as dt, requests
 
 URL = os.environ["SUPABASE_URL"].rstrip("/")
 KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ["SUPABASE_SECRET_KEY"]
 SB = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
 START = os.environ.get("START", "2026-06-25")
 END = os.environ.get("END", dt.date.today().isoformat())
+UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) trade-tracker/1.0"}
 
-CRYPTO = {"BTC": "btcusd", "ETH": "ethusd", "SOL": "solusd"}
-# Mirrors the update_prices.py STOOQ keys (incl. ETN/RTX) + crypto trio, so a
-# thin post-restore TradeData can never produce an empty backfill.
+YSYM = {"BTC": "BTC-USD", "ETH": "ETH-USD", "SOL": "SOL-USD"}
+CRYPTO = set(YSYM)
 STATIC = {"MU","INTC","NVDA","ORCL","SMH","QQQ","GLD","EWY","URA","XLE",
           "LLY","DAL","KO","WMT","JPM","ETN","RTX","BTC","ETH","SOL"}
 
@@ -31,28 +34,39 @@ def universe():
         print(f"TradeData read failed ({e}) - static universe only", file=sys.stderr)
     return sorted(tks)
 
-def stooq(tk):
-    sym = CRYPTO.get(tk, f"{tk.lower()}.us")
-    u = (f"https://stooq.com/q/d/l/?s={sym}"
-         f"&d1={START.replace('-','')}&d2={END.replace('-','')}&i=d")
-    r = requests.get(u, timeout=30); r.raise_for_status()
+def yahoo(tk):
+    sym = YSYM.get(tk, tk)
+    p1 = int(dt.datetime.fromisoformat(START + "T00:00:00+00:00").timestamp())
+    p2 = int(dt.datetime.fromisoformat(END + "T00:00:00+00:00").timestamp()) + 86400
+    u = (f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+         f"?period1={p1}&period2={p2}&interval=1d")
+    r = requests.get(u, headers=UA, timeout=30)
+    r.raise_for_status()
+    res = r.json()["chart"]["result"][0]
+    ts = res.get("timestamp") or []
+    closes = (res.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
     out = []
-    for row in csv.DictReader(io.StringIO(r.text)):
-        c = row.get("Close")
-        if not c or c == "N/D": continue
-        d = dt.date.fromisoformat(row["Date"])
-        if tk in CRYPTO and d.weekday() >= 5: continue  # match weekday cron shape
-        out.append({"ticker": tk, "mark_date": row["Date"],
-                    "price": float(c), "source": "stooq"})
+    for t, c in zip(ts, closes):
+        if c is None:
+            continue
+        d = dt.datetime.fromtimestamp(t, dt.timezone.utc).date()
+        di = d.isoformat()
+        if di < START or di > END:
+            continue
+        if tk in CRYPTO and d.weekday() >= 5:
+            continue  # keep the weekday cron shape
+        out.append({"ticker": tk, "mark_date": di,
+                    "price": round(float(c), 4), "source": "yahoo"})
     return out
 
 def main():
     payload = []
     for tk in universe():
         try:
-            rows = stooq(tk); print(f"{tk}: {len(rows)}"); payload += rows
+            rows = yahoo(tk); print(f"{tk}: {len(rows)}"); payload += rows
         except Exception as e:
             print(f"{tk}: FAIL {e}", file=sys.stderr)
+        time.sleep(0.6)
     if not payload: sys.exit("nothing fetched")
     r = requests.post(f"{URL}/rest/v1/price_marks?on_conflict=ticker,mark_date",
                       headers={**SB, "Content-Type": "application/json",

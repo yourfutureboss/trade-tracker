@@ -53,6 +53,31 @@ def fetch_stooq(symbol):
     return float(close)
 
 
+def fetch_yahoo_today(ticker):
+    """Close for MARK_DATE from Yahoo v8 chart (fallback: Stooq latest is
+    returning N/D for every equity from GitHub-runner IPs - 2026-07-18).
+    Only accepts a bar dated exactly MARK_DATE, so off-session runs write
+    nothing rather than a stale close."""
+    import datetime as _dt
+    u = ("https://query1.finance.yahoo.com/v8/finance/chart/" + ticker
+         + "?range=5d&interval=1d")
+    r = requests.get(u, headers={"User-Agent": "Mozilla/5.0 trade-tracker/1.0"},
+                     timeout=20)
+    r.raise_for_status()
+    res = r.json()["chart"]["result"][0]
+    ts = res.get("timestamp") or []
+    closes = (res.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+    for t, c in zip(reversed(ts), reversed(closes)):
+        if c is None:
+            continue
+        d = _dt.datetime.fromtimestamp(t, _dt.timezone.utc).date().isoformat()
+        if d == MARK_DATE:
+            return float(c)
+        if d < MARK_DATE:
+            break
+    return None
+
+
 def fetch_crypto():
     """{ticker: usd_price} from CoinGecko (one request for all ids)."""
     ids = ",".join(COINGECKO.values())
@@ -75,7 +100,7 @@ def collect_rows():
     rows = []
     for ticker, symbol in STOOQ.items():
         try:
-            price = fetch_stooq(symbol)
+            price = fetch_stooq(symbol) or fetch_yahoo_today(ticker)
             if price is None:
                 print(f"  {ticker:5} no data (skipped)")
             else:
