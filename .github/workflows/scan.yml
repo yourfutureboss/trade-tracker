@@ -1,0 +1,36 @@
+name: scan-universe
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 30 min after the nightly marks land
+  workflow_dispatch:
+    inputs:
+      dry_run: {description: "true = print only", default: "false"}
+permissions:
+  contents: read
+  issues: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install requests
+      - name: Scan universe
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -o pipefail
+          python scan_universe.py 2>&1 | tee scan.log
+      - name: Publish failure log as issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create -R ${{ github.repository }} \
+            --title "scan-universe failed $(date -u +%FT%H:%MZ)" \
+            --body "$(tail -c 3000 scan.log 2>/dev/null || echo 'no log')"
