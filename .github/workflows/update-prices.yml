@@ -29,7 +29,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python update_prices.py
+        run: |
+          set -o pipefail
+          python update_prices.py 2>&1 | tee up.log
 
       - name: Check triggers and alert
         if: always()
@@ -38,4 +40,15 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: python check_triggers.py
+        run: |
+          set -o pipefail
+          python check_triggers.py 2>&1 | tee ct.log
+
+      - name: Publish failure log as issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create -R ${{ github.repository }} \
+            --title "Daily prices failed $(date -u +%FT%H:%MZ)" \
+            --body "$(tail -c 3000 up.log 2>/dev/null; echo; tail -c 3000 ct.log 2>/dev/null)"
