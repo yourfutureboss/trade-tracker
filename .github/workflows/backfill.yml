@@ -4,6 +4,9 @@ on:
     inputs:
       start: {description: "YYYY-MM-DD", default: "2026-06-25"}
       end:   {description: "YYYY-MM-DD", default: "2026-07-17"}
+permissions:
+  contents: read
+  issues: write
 jobs:
   backfill:
     runs-on: ubuntu-latest
@@ -19,4 +22,14 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           START: ${{ inputs.start }}
           END: ${{ inputs.end }}
-        run: python backfill_prices.py
+        run: |
+          set -o pipefail
+          python backfill_prices.py 2>&1 | tee bf.log
+      - name: Publish failure log as issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create -R ${{ github.repository }} \
+            --title "backfill-prices failed $(date -u +%FT%H:%MZ)" \
+            --body "$(tail -c 6000 bf.log 2>/dev/null || echo 'no log captured')"
