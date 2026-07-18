@@ -27,6 +27,7 @@ STOOQ = {
     "SMH": "smh.us", "QQQ": "qqq.us", "GLD": "gld.us", "EWY": "ewy.us",
     "URA": "ura.us", "XLE": "xle.us", "LLY": "lly.us", "DAL": "dal.us",
     "KO": "ko.us", "WMT": "wmt.us", "JPM": "jpm.us",
+    "ETN": "etn.us", "RTX": "rtx.us",
 }
 # Crypto via CoinGecko (keyless). ticker -> CoinGecko id
 COINGECKO = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
