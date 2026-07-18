@@ -271,7 +271,7 @@
         <h3>Cluster exposure &amp; correlation risk</h3>
         <p class="cap">Active book (open + watching) grouped by correlation cluster — same-cluster names are one bet.</p>
         <div id="clusters"></div>
-        <div class="corrlegend" id="corrlegend"></div>
+        <div id="corrmeasured" style="margin-bottom:10px"></div><div class="corrlegend" id="corrlegend"></div>
         <p class="note" id="anote"></p>
       </div>
     </div>
@@ -311,7 +311,7 @@
   <footer class="foot">
     Current-price fields are yours to update (or ask me to refresh them) — they drive live R, distance-to-level and open P&L.
     Position size = <code>(account × risk%) ÷ |entry − stop|</code>; $ P&L = realized R × $ risk. R:R is arithmetic, not a probability.
-    v1.8.0 · definitions hydrate from Supabase (read-only key); prices from nightly <code>price_marks</code>; local edits persist on this device; <code>Export JSON</code> keeps a portable backup.
+    v1.9.0 · definitions hydrate from Supabase; intraday live_quotes overlay when fresher; measured ρ from v_corr_smh (read-only key); prices from nightly <code>price_marks</code>; local edits persist on this device; <code>Export JSON</code> keeps a portable backup.
   </footer>
 </div>
 
@@ -459,6 +459,12 @@ function pct(n){ if(n==null||isNaN(n)) return '—'; return (n>0?'+':'')+n.toFix
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function confDots(n){ n=+n||0; let s='<span class="conf">'; for(let i=0;i<5;i++) s+=`<i class="${i<n?'on':''}"></i>`; return s+'</span>'; }
 function dirTag(d){ return `<span class="dir ${d==='short'?'short':'long'}">${d==='short'?'SHORT':'LONG'}</span>`; }
+function corrChip(tk){
+  const c=meta.corr && meta.corr[(tk||'').toUpperCase()];
+  if(!c || c.n<40) return '';
+  const hot=c.r>=0.6;
+  return `<div class="sub ${hot?'':''}" style="${hot?'color:var(--short,#f66);':''}font-family:'IBM Plex Mono',monospace">ρ ${c.r.toFixed(2)} vs SMH${hot?' ⚠':''}</div>`;
+}
 function evBadge(it){ if(!it.event) return '';
   const d=Math.round((new Date(it.event+'T00:00:00')-new Date(new Date().toISOString().slice(0,10)+'T00:00:00'))/86400000);
   if(d<0||d>7) return ''; return ` <span class="chip warn" title="binary event ${it.event} — earnings-veto window">⚠ ev ${d}d</span>`; }
@@ -467,7 +473,7 @@ function clsR(n){ return n==null?'flat':n>0?'pos':n<0?'neg':'flat'; }
 // ---------- persistence ----------
 async function load(){
   try{ const r=await store.get(KEY); if(r&&r.value){ const o=JSON.parse(r.value); if(o&&o.items){ data=o.items; settings=Object.assign(settings,o.settings||{}); history=o.history||[]; if(o.scr){ scr.dismissed=o.scr.dismissed||{}; scr.log=o.scr.log||[]; } return; } } }catch(e){}
-  data=clone(SEED); save();
+  data=clone(SEED).map(d=>({...d,fromSeed:true})); save();
 }
 async function save(){ ensureTodayPoint(); try{ await store.set(KEY, JSON.stringify({settings, items:data, history, scr:{dismissed:scr.dismissed, log:(scr.log||[]).filter(x=>!x.synced)}})); }catch(e){} }
 
@@ -506,7 +512,7 @@ function renderWatch(){
     tr.innerHTML=`
       <td data-l="Setup"><span class="tk">${esc(it.tk)||'—'}</span>${dirTag(it.dir)}${evBadge(it)}<div class="sub">${esc(it.th)||''}</div></td>
       <td data-l="Sector"><span class="sector">${esc(it.sector||'—')}</span></td>
-      <td data-l="Type · Conf"><span class="tag">${esc(it.algo||'—')}</span> ${confDots(it.conf)}</td>
+      <td data-l="Type · Conf"><span class="tag">${esc(it.algo||'—')}</span> ${confDots(it.conf)}${corrChip(it.tk)}</td>
       <td class="num" data-l="Entry">${fmtN(m.en)}</td>
       <td class="num" data-l="Stop">${fmtN(m.st)}</td>
       <td class="num" data-l="Target">${fmtN(m.tg)}</td>
@@ -600,8 +606,8 @@ function renderSummary(){
 
 // ---------- analytics ----------
 function renderAnalytics(){
-  const closed=data.filter(d=>d.status==='target'||d.status==='stopped');
-  const wins=closed.filter(d=>d.status==='target'), losses=closed.filter(d=>d.status==='stopped');
+  const closed=data.filter(d=>d.status==='target'||d.status==='stopped'||(d.status==='closed'&&metrics(d).realized!=null));
+  const wins=closed.filter(d=>(metrics(d).realized||0)>0), losses=closed.filter(d=>(metrics(d).realized||0)<=0);
   const rs=closed.map(d=>metrics(d).realized).filter(x=>x!=null);
   const totR=rs.reduce((a,b)=>a+b,0), exp=rs.length?totR/rs.length:null;
   const grossW=rs.filter(x=>x>0).reduce((a,b)=>a+b,0), grossL=Math.abs(rs.filter(x=>x<0).reduce((a,b)=>a+b,0));
@@ -686,6 +692,17 @@ function renderClusters(){
 }
 
 function renderCorr(){
+  const cm=meta.corr||{}; const ks=Object.keys(cm).filter(t=>cm[t].n>=40).sort((a,b)=>cm[b].r-cm[a].r);
+  const meas=document.getElementById('corrmeasured');
+  if(meas) meas.innerHTML = ks.length
+    ? '<div class="sub" style="margin-bottom:4px">Measured 60-session ρ vs SMH — labels don\'t count, this does</div>'+ks.map(t=>{
+        const c=cm[t]; const w=Math.round(Math.abs(c.r)*100); const hot=c.r>=0.6;
+        return `<div class="ci" style="display:flex;align-items:center;gap:8px">
+          <span style="width:44px;font-family:'IBM Plex Mono',monospace">${t}</span>
+          <span style="flex:1;height:7px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden">
+            <span style="display:block;height:100%;width:${w}%;background:${hot?'var(--short,#f66)':c.r<0?'#59d6b5':'#7aa2f7'}"></span></span>
+          <span style="width:76px;text-align:right;font-family:'IBM Plex Mono',monospace;${hot?'color:var(--short,#f66)':''}">${c.r>=0?'+':''}${c.r.toFixed(2)}${hot?' ⚠':''}</span></div>`;}).join('')
+    : '<div class="sub">Measured correlations load from Supabase (v_corr_smh) when hosted.</div>';
   document.getElementById('corrlegend').innerHTML=[
     ['Semis/AI ↔ Crypto','up','move together (risk-on); a tech flush hits both'],
     ['Oil complex','dn','Energy (XLE) and Transports (DAL) are inverse on oil — a hedge pair, not two bets'],
@@ -834,13 +851,25 @@ async function hydrate(){
   const c=CONFIG.supabase;
   if(!c.enabled||typeof fetch!=='function') return false;
   try{
-    const [rows,marks,sugg]=await Promise.all([
+    const [rows,marks,sugg,corr,live]=await Promise.all([
       sbq('TradeData?select=*&order=ticker.asc'),
       sbq('price_marks?select=ticker,mark_date,price&order=mark_date.desc&limit=200'),
-      sbq('screener_suggestions?select=*&status=eq.new&order=run_at.desc').catch(()=>[])
+      sbq('screener_suggestions?select=*&status=eq.new&order=run_at.desc').catch(()=>[]),
+      sbq('v_corr_smh?select=*').catch(()=>[]),
+      sbq('live_quotes?select=*').catch(()=>[])
     ]);
     const latest={};
     marks.forEach(m=>{ const t=(m.ticker||'').toUpperCase(); if(!(t in latest)) latest[t]=+m.price; });
+    const marksHi = marks[0] ? marks[0].mark_date : null;
+    let liveAt=null;
+    (Array.isArray(live)?live:[]).forEach(q=>{
+      const t=(q.ticker||'').toUpperCase();
+      if(q.price!=null && q.quote_date && marksHi && q.quote_date>=marksHi){
+        latest[t]=+q.price; liveAt=q.quoted_at||liveAt;   // live beats daily only when fresher
+      }
+    });
+    meta.corr={};
+    (Array.isArray(corr)?corr:[]).forEach(c=>{ meta.corr[(c.ticker||'').toUpperCase()]={r:+c.corr_60d,n:+c.n_obs,at:c.calc_date}; });
     const fromDb=rows.map(r=>{ const tk=(r.ticker||'').toUpperCase();
       let st=({watch:'watching'})[r.status]||r.status||'watching'; if(!STATUS[st]) st='watching';
       return { tk, dir:r.direction==='short'?'short':'long',
@@ -852,10 +881,10 @@ async function hydrate(){
         status:st, dOpen:r.opened_on||'', dClose:r.closed_on||'',
         real:r.realized_r!=null?+r.realized_r:'', event:r.event_date||'', notes:r.notes||'', _db:true };});
     const dbKeys=new Set(fromDb.map(d=>d.tk));
-    const keepLocal=data.filter(d=>!d._db && !dbKeys.has(d.tk));
+    const keepLocal=data.filter(d=>!d._db && !d.fromSeed && !dbKeys.has(d.tk));
     data=[...fromDb,...keepLocal];
     scr.sugg=Array.isArray(sugg)?sugg:[];
-    meta.sync={at:new Date().toISOString(), marks:marks[0]?marks[0].mark_date:null};
+    meta.sync={at:new Date().toISOString(), marks:marksHi, live:liveAt};
     await save(); return true;
   }catch(e){ meta.sync={error:String(e&&e.message||e)}; return false; }
 }
@@ -863,6 +892,7 @@ function syncChip(){
   const el=document.getElementById('syncchip'); if(!el) return;
   if(!meta.sync){ el.textContent='local'; el.className='chip mut'; return; }
   if(meta.sync.error){ el.textContent='offline — local data'; el.className='chip warn'; el.title=meta.sync.error; return; }
+  if(meta.sync.live){ el.textContent='live · '+meta.sync.live.slice(11,16)+'Z'; el.className='chip ok'; return; }
   el.textContent='DB · marks '+(meta.sync.marks||'—'); el.className='chip ok';
 }
 function scrVisible(){ const today=new Date().toISOString().slice(0,10);
@@ -891,6 +921,8 @@ function auditRow(s,pushed){ return {at:new Date().toISOString(), tk:s.ticker, c
   en:s.entry!=null?+s.entry:null, st:s.stop!=null?+s.stop:null, tg:s.target!=null?+s.target:null,
   corrSemis:!!s.corr_semis, setup:s.setup_type||null, pushed:!!pushed, synced:false}; }
 function adoptSugg(id){ const s=(scr.sugg||[]).find(x=>x.id===id); if(!s) return;
+  const c=meta.corr && meta.corr[(s.ticker||'').toUpperCase()];
+  if(c && c.n>=40 && c.r>=0.6 && !confirm(`${s.ticker}: measured ρ ${c.r.toFixed(2)} vs SMH over ${c.n} sessions — this adds to the concentrated semis/AI cluster. Adopt anyway?`)) return;
   data.unshift({tk:(s.ticker||'').toUpperCase(),dir:'long',sector:s.sector||'Other',cluster:s.cluster||'Uncorrelated',
     algo:ALGOMAP[s.setup_type]||s.setup_type||'— none',conf:+s.confluence||0,th:(s.thesis||'').slice(0,90),
     en:s.entry!=null?+s.entry:0,st:s.stop!=null?+s.stop:0,tg:s.target!=null?+s.target:0,cur:'',exit:null,
@@ -915,6 +947,8 @@ function syncScreenerLog(){
   F('acct').value=settings.account; F('riskpct').value=settings.riskPct;
   await save(); render(); renderScreener(); syncChip();
   if(!sy) console.warn('hydrate skipped/failed - running on local data');
+  setInterval(async()=>{ if(document.visibilityState!=='visible') return;
+    if(await hydrate()){ render(); renderScreener(); syncChip(); } }, 300000);
 })();
 </script>
 </body>

@@ -1,0 +1,33 @@
+name: live-watch
+on:
+  schedule:
+    - cron: "0,30 13-21 * * 1-5"   # every 30 min, 13:00-21:30 UTC weekdays (RTH both DST regimes)
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  issues: write
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install requests
+      - name: Live watch
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          python live_watch.py 2>&1 | tee lw.log
+      - name: Publish failure log as issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create -R ${{ github.repository }} \
+            --title "live-watch failed $(date -u +%FT%H:%MZ)" \
+            --body "$(tail -c 3000 lw.log 2>/dev/null || echo 'no log')"
