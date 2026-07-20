@@ -15,6 +15,7 @@ DRY_RUN=true prints instead of writing. Missing ANTHROPIC_API_KEY exits 0
 with setup instructions so the cron stays green until the secret lands.
 """
 import os, sys, json, math, datetime as dt, statistics, time, requests
+import detectors
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ["SUPABASE_SECRET_KEY"]
@@ -68,6 +69,11 @@ def closes_from_marks(tk, n=90):
                   order="mark_date.asc")
     return [(r["mark_date"], float(r["price"])) for r in rows][-n:]
 
+def bars_for(tk):
+    """One Yahoo OHLCV fetch feeds prefilter closes, A-K detectors and corr."""
+    bars = detectors.fetch_ohlcv_yahoo(tk, days=400)
+    return bars, [(b["d"], b["c"]) for b in bars]
+
 def closes_from_yahoo(tk, days=130):
     end = dt.date.today(); start = end - dt.timedelta(days=days)
     p1 = int(dt.datetime.fromisoformat(start.isoformat()+"T00:00:00+00:00").timestamp())
@@ -85,9 +91,6 @@ def closes_from_yahoo(tk, days=130):
                     float(c)))
     return out
 
-def closes(tk):
-    rows = closes_from_marks(tk)
-    return rows if len(rows) >= 40 else closes_from_yahoo(tk)
 
 def precondition(px):
     """Dumb on purpose (cost filter, not signal): keep names within 8% of the
@@ -113,13 +116,25 @@ def corr_vs_smh(px, smh_rets):
 SCAN_SYSTEM = """You are the screener inside a systematic swing-trading stack. Score long swing setups only, using the five-family confluence framework (trend/MA structure, momentum, level, volume-flow, context), setup types A-K (A trend continuation, B trend turn, E mean reversion, F breakdown/squeeze, G trend stack, H level reversal, I Fib pullback), 0-5 confluence. Frame levels as what traders are watching, never predictions; R:R is arithmetic. Be selective - 'pass' is a first-class verdict.
 Given tickers with recent closes, reply with ONLY a JSON array, no prose, no code fences. One object per ticker:
 {"ticker","verdict":"candidate"|"pass","setup_type","confluence":0-5,"entry","stop","target","thesis":"<=140 chars","event_date":"YYYY-MM-DD or null if no known binary event","event_label","reason":"required when verdict=pass"}
-Numbers for entry/stop/target must be plausible vs the given closes (entry>stop for longs). If you don't know an upcoming earnings date, use null - never guess one."""
+Numbers for entry/stop/target must be plausible vs the given closes (entry>stop for longs). If you don't know an upcoming earnings date, use null - never guess one.
+Each ticker line includes the deterministic A-K detector read from the same framework. When a detector fired, anchor entry/stop/target on its levels and use its code as setup_type unless the chart clearly contradicts it; when a detector was VETOED, respect the veto (verdict pass, cite it); when none fired, only call candidate on exceptional confluence."""
+
+def det_line(det):
+    live = [d for d in det if not d["veto"]]
+    if live:
+        d = live[0]
+        return (f"detector {d['code']} fired: {d['name']}, entry {d['entry']} "
+                f"stop {d['stop']} target {d['target']} rr {d['rr']} conf {d['confluence']}/5 - {d['note']}")
+    if det:
+        d = det[0]
+        return f"detector {d['code']} VETOED: {d['veto']}"
+    return "no deterministic detector fired"
 
 def haiku_batch(items):
     lines = []
-    for tk, px in items:
+    for tk, px, det in items:
         tail = [round(p, 2) for _, p in px][-30:]
-        lines.append(f"{tk} ({sector_of(tk)}): last30={tail}")
+        lines.append(f"{tk} ({sector_of(tk)}): last30={tail} | {det_line(det)}")
     r = requests.post("https://api.anthropic.com/v1/messages",
         headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
@@ -177,12 +192,14 @@ def main():
     survivors = []
     for tk in uni:
         try:
-            px = closes(tk)
-            if precondition(px): survivors.append((tk, px))
+            bars, px = bars_for(tk)
+            if precondition(px):
+                det = detectors.detect_all(bars, long_only=True)
+                survivors.append((tk, px, det))
             time.sleep(0.4)
         except Exception as e:
             print(f"  {tk}: data FAIL {e}")
-    print(f"prefilter kept {len(survivors)}: {' '.join(t for t,_ in survivors)}")
+    print(f"prefilter kept {len(survivors)}: {' '.join(t for t,_,_ in survivors)}")
     if not survivors:
         print("nothing to scan today."); return
     today = dt.date.today()
@@ -193,12 +210,20 @@ def main():
             tickets = haiku_batch(chunk)
         except Exception as e:
             print(f"  batch {i//BATCH}: model FAIL {e}"); continue
-        cmap = {tk: corr_vs_smh(px, smh_rets) for tk, px in chunk}
+        cmap = {tk: corr_vs_smh(px, smh_rets) for tk, px, _ in chunk}
+        dmap = {tk: det for tk, _, det in chunk}
         for t in tickets if isinstance(tickets, list) else []:
             tk = str(t.get("ticker", "")).upper()
             if tk not in cmap: continue
             corr, n = cmap[tk]
             g = gate({**t, "ticker": tk}, corr, n)
+            if g and g["verdict"] == "candidate":
+                fired = [d for d in dmap.get(tk, []) if not d["veto"]]
+                if not fired and (g.get("confluence") or 0) < 4:
+                    g["verdict"] = "pass"
+                    g["reason"] = "no deterministic A-K detector confirmation"
+                elif fired and not g.get("setup_type"):
+                    g["setup_type"] = fired[0]["code"]
             if g: out.append(g)
     rows = [{"ticker": t["ticker"], "verdict": t["verdict"],
              "confluence": t.get("confluence"), "entry": t.get("entry"),
