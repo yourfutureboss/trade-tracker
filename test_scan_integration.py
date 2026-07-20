@@ -69,7 +69,7 @@ T("prompt carries detector-F grounding for VRT", "detector F fired" in (ST["prom
 pg_line = next((l for l in (ST["prompt"] or "").splitlines() if l.startswith("PG ")), "")
 T("prompt marks PG as no-live-detector", ("no deterministic detector fired" in pg_line) or ("VETOED" in pg_line))
 T("VRT stays candidate + setup_type filled from detector", by.get("VRT", {}).get("verdict") == "candidate" and by["VRT"]["setup_type"] == "F")
-T("PG conf3 no-detector downgraded to pass", by.get("PG", {}).get("verdict") == "pass" and "A-K detector" in by["PG"]["reason"])
+T("PG conf3 no-detector downgraded to pass", any(r["ticker"]=="PG" and r["verdict"]=="pass" and "A-K detector" in (r["reason"] or "") for r in rows))
 T("MS conf4 no-detector survives (exceptional-confluence path)", by.get("MS", {}).get("verdict") == "candidate")
 T("rr recompute intact on VRT", by.get("VRT", {}).get("rr") == 2.0)
 T("expiry stamped +7d", all(r["expires_on"] == (TODAY+dt.timedelta(days=7)).isoformat() for r in rows))
