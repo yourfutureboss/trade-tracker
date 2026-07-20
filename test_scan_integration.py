@@ -47,7 +47,9 @@ def post(url, **kw):
                {"ticker": "PG", "verdict": "candidate", "setup_type": "G", "confluence": 3,
                 "entry": 100.5, "stop": 97.0, "target": 108.0, "thesis": "meh", "event_date": None},
                {"ticker": "MS", "verdict": "candidate", "setup_type": "B", "confluence": 4,
-                "entry": 100.4, "stop": 97.2, "target": 107.5, "thesis": "strong anyway", "event_date": None}]
+                "entry": 100.4, "stop": 97.2, "target": 107.5, "thesis": "strong anyway", "event_date": None},
+               {"ticker": "PG", "verdict": "pass", "setup_type": None, "confluence": 1,
+                "entry": None, "stop": None, "target": None, "reason": "detector vetoed - respecting"}]
         return R({"content": [{"type": "text", "text": json.dumps(arr)}]})
     ST["posts"].append((url.split("/rest/v1/")[1].split("?")[0], kw["json"])); return R({}, 201)
 
@@ -55,7 +57,7 @@ fake = types.ModuleType("requests"); fake.get = get; fake.post = post
 sys.modules["requests"] = fake
 import scan_universe as su
 su.detectors.fetch_ohlcv_yahoo = lambda tk, days=400: [dict(b) for b in FIX[tk]]
-su.PRESETS = {"Test": "VRT PG MS"}; su.UNIVERSE_CAP = 10; su.BATCH = 6
+su.PRESETS = {"Test": "VRT PG MS"}  # note: model returns 2 PG tickets; both should survive gating; su.UNIVERSE_CAP = 10; su.BATCH = 6
 su.time.sleep = lambda *_: None
 
 su.main()
@@ -71,5 +73,6 @@ T("PG conf3 no-detector downgraded to pass", by.get("PG", {}).get("verdict") == 
 T("MS conf4 no-detector survives (exceptional-confluence path)", by.get("MS", {}).get("verdict") == "candidate")
 T("rr recompute intact on VRT", by.get("VRT", {}).get("rr") == 2.0)
 T("expiry stamped +7d", all(r["expires_on"] == (TODAY+dt.timedelta(days=7)).isoformat() for r in rows))
+T("null-level pass ticket survives the gate", sum(1 for r in rows if r["ticker"]=="PG")==2 and any(r["ticker"]=="PG" and r["verdict"]=="pass" and r["entry"] is None for r in rows))
 T("audit row logged", any(n == "screener_log" for n, _ in ST["posts"]))
 print("\n".join(out)); sys.exit(1 if any(x.startswith("FAIL") for x in out) else 0)

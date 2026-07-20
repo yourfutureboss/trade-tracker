@@ -149,15 +149,17 @@ def haiku_batch(items):
 
 def gate(t, corr, n_obs):
     """Deterministic gates over one model ticket. Mutates + returns t or None."""
-    try:
-        en, sp, tg = float(t["entry"]), float(t["stop"]), float(t["target"])
-    except (KeyError, TypeError, ValueError):
-        return None
     if t.get("verdict") not in ("candidate", "pass"): return None
     t["corr_measured"] = corr
     t["corr_semis"] = bool(corr is not None and corr >= CORR_FLAG)
     if t["verdict"] == "pass":
-        t["rr"] = None; return t
+        t["rr"] = None; return t          # levels optional on a pass
+    try:
+        en, sp, tg = float(t["entry"]), float(t["stop"]), float(t["target"])
+    except (KeyError, TypeError, ValueError):
+        t["verdict"], t["rr"] = "veto", None
+        t["reason"] = "candidate ticket missing numeric levels"
+        return t
     if not (en > sp and tg > en):
         t["verdict"], t["reason"] = "veto", "level arithmetic fails (need stop<entry<target)"
         t["rr"] = None; return t
