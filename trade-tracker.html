@@ -311,7 +311,7 @@
   <footer class="foot">
     Current-price fields are yours to update (or ask me to refresh them) — they drive live R, distance-to-level and open P&L.
     Position size = <code>(account × risk%) ÷ |entry − stop|</code>; $ P&L = realized R × $ risk. R:R is arithmetic, not a probability.
-    v1.9.0 · definitions hydrate from Supabase; intraday live_quotes overlay when fresher; measured ρ from v_corr_smh (read-only key); prices from nightly <code>price_marks</code>; local edits persist on this device; <code>Export JSON</code> keeps a portable backup.
+    v1.9.1 · definitions hydrate from Supabase; intraday live_quotes overlay when fresher; measured ρ from v_corr_smh (read-only key); prices from nightly <code>price_marks</code>; local edits persist on this device; <code>Export JSON</code> keeps a portable backup.
   </footer>
 </div>
 
@@ -899,9 +899,13 @@ function scrVisible(){ const today=new Date().toISOString().slice(0,10);
   return (scr.sugg||[]).filter(s=>!scr.dismissed[s.id] && (!s.expires_on || s.expires_on>=today)); }
 function renderScreener(){
   const wrap=document.getElementById('scr-cards'); if(!wrap) return;
-  const list=scrVisible();
-  document.getElementById('empty-scr').style.display=list.length?'none':'block';
-  document.getElementById('scr-meta').textContent=list.length? list.length+' live suggestion(s)':'';
+  const all=scrVisible();
+  const list=all.filter(s=>s.verdict==='candidate');
+  const gated=all.filter(s=>s.verdict!=='candidate');
+  document.getElementById('empty-scr').style.display=(list.length||gated.length)?'none':'block';
+  document.getElementById('scr-meta').textContent=list.length? list.length+' live candidate(s)':'';
+  const gatedHtml = gated.length ? `<div class="sub" style="margin-top:10px;cursor:pointer" onclick="var g=document.getElementById('scr-gated');g.style.display=g.style.display==='none'?'block':'none'">gated by rules: ${gated.length} — tap to toggle</div>
+    <div id="scr-gated" style="display:none">${gated.map(s=>`<div class="sub" style="padding:3px 0;border-bottom:1px solid var(--line,#222)"><b>${esc(s.ticker)}</b> ${esc(s.verdict)} — ${esc(s.reason||s.thesis||'')}</div>`).join('')}</div>` : '';
   wrap.innerHTML=list.map(s=>{
     const rr=s.rr!=null?(+s.rr).toFixed(1)+':1':'—';
     const corr=s.corr_semis?'<div class="sub" style="color:var(--neg,#f66)">⚠ semis/AI-correlated — adds to the concentrated cluster'+(s.corr_measured!=null?' (ρ '+(+s.corr_measured).toFixed(2)+')':'')+'</div>':'';
@@ -912,10 +916,10 @@ function renderScreener(){
       <div class="rowact" style="margin-top:6px">
         <button class="btn small" data-adopt="${s.id}">Adopt → watchlist</button>
         <button class="btn small ghost" data-dismiss="${s.id}">Dismiss</button>
-      </div></div>`;}).join('');
+      </div></div>`;}).join('') + gatedHtml;
   wrap.querySelectorAll('[data-adopt]').forEach(b=>b.onclick=()=>adoptSugg(+b.dataset.adopt));
   wrap.querySelectorAll('[data-dismiss]').forEach(b=>b.onclick=()=>dismissSugg(+b.dataset.dismiss));
-  const n=document.getElementById('ct-scr'); if(n) n.textContent=list.length;
+  const n=document.getElementById('ct-scr'); if(n) n.textContent=list.length;  // candidates only
 }
 function auditRow(s,pushed){ return {at:new Date().toISOString(), tk:s.ticker, conf:s.confluence!=null?+s.confluence:null,
   en:s.entry!=null?+s.entry:null, st:s.stop!=null?+s.stop:null, tg:s.target!=null?+s.target:null,
