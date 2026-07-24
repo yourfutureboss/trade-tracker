@@ -79,8 +79,16 @@ def main():
             continue
 
         entry, stop, target = s.get("entry"), s.get("stop"), s.get("target")
-        if not gated and st == "watch" and entry is not None and lo * (px - float(entry)) > 0:
-            hits.append((f"[alert] {t} entry-hit {float(entry):g}",
+        kind = (s.get("trigger_kind") or "break").lower()
+        bl = float(s["break_level"]) if s.get("break_level") is not None else None
+        en_f = float(entry) if entry is not None else None
+        x_up = lambda lvl: prev is not None and lvl is not None and lo*(lvl-prev) > 0 and lo*(px-lvl) >= 0
+        x_dn = lambda lvl: prev is not None and lvl is not None and lo*(prev-lvl) > 0 and lo*(lvl-px) >= 0
+        ehit = (kind in ("pullback","dual") and x_dn(en_f)) or \
+               (kind == "dual" and x_up(bl)) or (kind == "break" and x_up(en_f))
+        elvl = bl if (kind == "dual" and x_up(bl) and not x_dn(en_f)) else en_f
+        if not gated and st == "watch" and ehit:
+            hits.append((f"[alert] {t} entry-hit {elvl:g}",
                          f"{t} closed {px} on {mark}, through entry {float(entry):g} "
                          f"(setup {s.get('setup_type')}, {s.get('confluence')}/5). "
                          f"Close-confirmed. Flip status to triggered if taken."))

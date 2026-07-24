@@ -311,7 +311,7 @@
   <footer class="foot">
     Current-price fields are yours to update (or ask me to refresh them) — they drive live R, distance-to-level and open P&L.
     Position size = <code>(account × risk%) ÷ |entry − stop|</code>; $ P&L = realized R × $ risk. R:R is arithmetic, not a probability.
-    v1.9.1 · definitions hydrate from Supabase; intraday live_quotes overlay when fresher; measured ρ from v_corr_smh (read-only key); prices from nightly <code>price_marks</code>; local edits persist on this device; <code>Export JSON</code> keeps a portable backup.
+    v1.9.2 · definitions hydrate from Supabase; intraday live_quotes overlay when fresher; measured ρ from v_corr_smh (read-only key); prices from nightly <code>price_marks</code>; local edits persist on this device; <code>Export JSON</code> keeps a portable backup.
   </footer>
 </div>
 
@@ -459,6 +459,12 @@ function pct(n){ if(n==null||isNaN(n)) return '—'; return (n>0?'+':'')+n.toFix
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function confDots(n){ n=+n||0; let s='<span class="conf">'; for(let i=0;i<5;i++) s+=`<i class="${i<n?'on':''}"></i>`; return s+'</span>'; }
 function dirTag(d){ return `<span class="dir ${d==='short'?'short':'long'}">${d==='short'?'SHORT':'LONG'}</span>`; }
+function trigMark(it){
+  if((it.status||'')!=='watching') return '';
+  if(it.trig==='pullback') return '<span class="mut" title="pullback trigger — buy the dip into this level">↧</span> ';
+  if(it.trig==='dual') return `<span class="mut" title="dual: pullback ${it.en} / break ${it.brk}">↧↥</span> `;
+  return '<span class="mut" title="break trigger — buy the close through this level">↥</span> ';
+}
 function corrChip(tk){
   const c=meta.corr && meta.corr[(tk||'').toUpperCase()];
   if(!c || c.n<40) return '';
@@ -513,7 +519,7 @@ function renderWatch(){
       <td data-l="Setup"><span class="tk">${esc(it.tk)||'—'}</span>${dirTag(it.dir)}${evBadge(it)}<div class="sub">${esc(it.th)||''}</div></td>
       <td data-l="Sector"><span class="sector">${esc(it.sector||'—')}</span></td>
       <td data-l="Type · Conf"><span class="tag">${esc(it.algo||'—')}</span> ${confDots(it.conf)}${corrChip(it.tk)}</td>
-      <td class="num" data-l="Entry">${fmtN(m.en)}</td>
+      <td class="num" data-l="Entry">${trigMark(it)}${fmtN(m.en)}</td>
       <td class="num" data-l="Stop">${fmtN(m.st)}</td>
       <td class="num" data-l="Target">${fmtN(m.tg)}</td>
       <td class="num" data-l="R:R">${m.rr==null?'—':m.rr.toFixed(1)+':1'}</td>
@@ -877,7 +883,7 @@ async function hydrate(){
         algo:ALGOMAP[r.setup_type]||r.setup_type||'— none', conf:+r.confluence||0,
         th:((r.notes||'').split(/[.;]/)[0]||'').slice(0,90),
         en:r.entry!=null?+r.entry:0, st:r.stop!=null?+r.stop:0, tg:r.target!=null?+r.target:0,
-        exit:r.exit!=null?+r.exit:null, cur:(tk in latest)?latest[tk]:'',
+        exit:r.exit!=null?+r.exit:null, trig:r.trigger_kind||'break', brk:r.break_level!=null?+r.break_level:null, cur:(tk in latest)?latest[tk]:'',
         status:st, dOpen:r.opened_on||'', dClose:r.closed_on||'',
         real:r.realized_r!=null?+r.realized_r:'', event:r.event_date||'', notes:r.notes||'', _db:true };});
     const dbKeys=new Set(fromDb.map(d=>d.tk));

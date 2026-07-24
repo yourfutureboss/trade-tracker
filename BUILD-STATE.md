@@ -2,7 +2,7 @@
 Updated 2026-07-18 · verified against live repo + Supabase (not memory)
 
 ## Versions
-- tracker: **trade-tracker.html v1.9.1** (inbox shows candidates; pass/veto collapsed under 'gated by rules') (forward-rebuild on committed base; NOT the chat-side v1.7 lineage — that file was never committed and is unrecoverable byte-exact)
+- tracker: **trade-tracker.html v1.9.2** (trigger-direction arrows on watch entries) (inbox shows candidates; pass/veto collapsed under 'gated by rules') (forward-rebuild on committed base; NOT the chat-side v1.7 lineage — that file was never committed and is unrecoverable byte-exact)
 - repo HEAD: a6feb08 (main) · workflows: `update-prices.yml` ("Daily prices", cron 22:00 UTC Mon–Fri, ACTIVE), `backfill.yml` (dispatch, inputs start/end, failure→issue harness)
 - scripts: update_prices.py (Yahoo-only, date-guarded, dynamic universe, self-check; Stooq removed), backfill_prices.py (Yahoo v8 history, TradeData∪static universe, ignore-duplicates), check_triggers.py (WARN_DAYS=5, statuses watch/triggered, dedupe by open issue title)
 
@@ -31,6 +31,7 @@ Hot (≥0.6): QQQ .94 · MU .84 · INTC .78 · **ETN .77** · EWY .77 · NVDA .6
 NVDA (confirm not stopped at 198) · LLY (stop + opened_on approximate; entry 1183/tg 1255 per 6/30) · DAL (stop + realized_r pending; exit=7/9 close) · QQQ/EWY (still open?)
 
 ## Ops learnings (wk of 07-20)
+- trigger_kind shipped (break/pullback/dual + break_level): entry alerts are CROSSING-based vs the prior daily mark in both watchers; stop/target stay state-based. Book cleaned 07-24 per ATX: QQQ/EWY stopped -1R, URA/XLE/WMT invalid.
 - Alert titles are now UNDATED and unified across nightly+live: one open issue per (ticker, kind, level); closing the issue re-arms it. The dated design produced 52 dupes in 4 days.
 - Screener exclusion = unexpired live CANDIDATES only; passes/vetoes never block (14 passes froze the universe Tue-Thu). Audit row on every run incl. universe-0.
 - RTX veto case study: held out of earnings; stock +7.3% through the print to 209 - veto cost a winner this time, by design. Setup completed without entry; re-scan for new structure.

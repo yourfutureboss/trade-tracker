@@ -70,26 +70,43 @@ def issue(title, body):
                       timeout=30, json={"title": title, "body": body, "labels": ["live-alert"]})
     r.raise_for_status()
 
-def conditions(s, px, day):
-    """Return [(title, body)] for one setup at price px."""
+def conditions(s, px, base, day):
+    """[(title, body)] for one setup at live price px; base = last daily mark.
+    Entry alerts are CROSSING-based per trigger_kind (break: up through entry;
+    pullback: down into the buy zone; dual: either leg). Stop/target stay
+    state-based so an already-broken setup still surfaces once."""
     t, st = s["ticker"], s["status"]
     lo = 1 if (s.get("direction") or "long").lower() == "long" else -1
     en = float(s["entry"]) if s.get("entry") is not None else None
     sp = float(s["stop"]) if s.get("stop") is not None else None
     tg = float(s["target"]) if s.get("target") is not None else None
+    bl = float(s["break_level"]) if s.get("break_level") is not None else None
+    kind = (s.get("trigger_kind") or "break").lower()
+    x_up = lambda lvl: base is not None and lvl is not None and lo*(lvl-base) > 0 and lo*(px-lvl) >= 0
+    x_dn = lambda lvl: base is not None and lvl is not None and lo*(base-lvl) > 0 and lo*(lvl-px) >= 0
     out = []
     def T(kind, lvl): return f"[alert] {t} {kind} {lvl:g}"   # undated: one open issue per condition; close to re-arm
     if st == "watch":
         if sp is not None and lo * (sp - px) > 0:
             out.append((T("invalidated-through-stop", sp),
                         f"{day} live: {t} trading {px:g}, through stop {sp:g} before entry - setup broken, stand down."))
-        elif en is not None and lo * (px - en) > 0:
+        elif kind in ("pullback", "dual") and x_dn(en):
             out.append((T("entry-hit", en),
-                        f"{day} live: {t} trading {px:g}, through entry {en:g} "
+                        f"{day} live: {t} pulled back to {px:g}, into the {en:g} buy zone "
                         f"(setup {s.get('setup_type')}, {s.get('confluence')}/5). The plan is live."))
-        elif en is not None and abs(px - en) / en <= NEAR_PCT:
+        elif kind == "dual" and x_up(bl):
+            out.append((T("entry-hit", bl),
+                        f"{day} live: {t} trading {px:g}, broke {bl:g} "
+                        f"(dual trigger, setup {s.get('setup_type')}). The plan is live."))
+        elif kind == "break" and x_up(en):
+            out.append((T("entry-hit", en),
+                        f"{day} live: {t} trading {px:g}, up through entry {en:g} "
+                        f"(setup {s.get('setup_type')}, {s.get('confluence')}/5). The plan is live."))
+        elif en is not None and (
+                (kind == "break" and 0 <= lo*(en-px)/en <= NEAR_PCT) or
+                (kind in ("pullback", "dual") and 0 <= lo*(px-en)/en <= NEAR_PCT)):
             out.append((T("near-entry", en),
-                        f"{day} live: {t} at {px:g}, within 1% of entry {en:g}. Heads-up only."))
+                        f"{day} live: {t} at {px:g}, within 1% of the {en:g} trigger. Heads-up only."))
     elif st == "triggered":
         if sp is not None and lo * (sp - px) > 0:
             out.append((T("stop-breach", sp),
@@ -132,7 +149,7 @@ def main():
                          f"{day}: {tk} daily {base:g} vs live {px:g} ({abs(px/base-1)*100:.0f}%). Verify split/halt/bad print. "
                          f"Level alerts muted for this name this run."))
             continue
-        hits += conditions(s, px, day)
+        hits += conditions(s, px, base, day)
     if rows:
         r = requests.post(f"{SUPABASE_URL}/rest/v1/live_quotes?on_conflict=ticker",
                           headers={**SB, "Content-Type": "application/json",
