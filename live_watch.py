@@ -78,24 +78,24 @@ def conditions(s, px, day):
     sp = float(s["stop"]) if s.get("stop") is not None else None
     tg = float(s["target"]) if s.get("target") is not None else None
     out = []
-    def T(kind, lvl): return f"[live] {t} {kind} {lvl:g} {day}"
+    def T(kind, lvl): return f"[alert] {t} {kind} {lvl:g}"   # undated: one open issue per condition; close to re-arm
     if st == "watch":
         if sp is not None and lo * (sp - px) > 0:
             out.append((T("invalidated-through-stop", sp),
-                        f"{t} trading {px:g}, through stop {sp:g} before entry - setup broken, stand down."))
+                        f"{day} live: {t} trading {px:g}, through stop {sp:g} before entry - setup broken, stand down."))
         elif en is not None and lo * (px - en) > 0:
             out.append((T("entry-hit", en),
-                        f"{t} trading {px:g}, through entry {en:g} "
+                        f"{day} live: {t} trading {px:g}, through entry {en:g} "
                         f"(setup {s.get('setup_type')}, {s.get('confluence')}/5). The plan is live."))
         elif en is not None and abs(px - en) / en <= NEAR_PCT:
             out.append((T("near-entry", en),
-                        f"{t} at {px:g}, within 1% of entry {en:g}. Heads-up only."))
+                        f"{day} live: {t} at {px:g}, within 1% of entry {en:g}. Heads-up only."))
     elif st == "triggered":
         if sp is not None and lo * (sp - px) > 0:
             out.append((T("stop-breach", sp),
-                        f"{t} trading {px:g}, through stop {sp:g}. Exit signal."))
+                        f"{day} live: {t} trading {px:g}, through stop {sp:g}. Exit signal."))
         if tg is not None and lo * (px - tg) > 0:
-            out.append((T("target-hit", tg), f"{t} trading {px:g}, beyond target {tg:g}."))
+            out.append((T("target-hit", tg), f"{day} live: {t} trading {px:g}, beyond target {tg:g}."))
     return out
 
 def main():
@@ -128,8 +128,8 @@ def main():
                      "quoted_at": t.isoformat(), "price": px})
         base = last_daily(tk)
         if base and abs(px / base - 1) > MOVE_GATE:
-            hits.append((f"[data] {tk} live quote {abs(px/base-1)*100:.0f}% off last mark {day}",
-                         f"{tk}: daily {base:g} vs live {px:g}. Verify split/halt/bad print. "
+            hits.append((f"[data] {tk} live quote off last mark",
+                         f"{day}: {tk} daily {base:g} vs live {px:g} ({abs(px/base-1)*100:.0f}%). Verify split/halt/bad print. "
                          f"Level alerts muted for this name this run."))
             continue
         hits += conditions(s, px, day)

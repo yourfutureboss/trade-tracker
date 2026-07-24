@@ -60,8 +60,12 @@ def build_universe():
             if t not in names: names.append(t)
     active = {r["ticker"] for r in sb_get("TradeData", select="ticker,status")
               if r.get("status") in ("watch", "triggered")}
+    # Only unexpired live CANDIDATES block a re-scan; passes/vetoes don't -
+    # 14 pass tickets froze the whole universe for a week (2026-07-21..23).
     live = {r["ticker"] for r in sb_get("screener_suggestions",
-                                        select="ticker,status", status="eq.new")}
+                                        select="ticker", status="eq.new",
+                                        verdict="eq.candidate",
+                                        expires_on=f"gte.{dt.date.today().isoformat()}")}
     return [t for t in names if t not in active and t not in live][:UNIVERSE_CAP]
 
 def closes_from_marks(tk, n=90):
@@ -190,6 +194,12 @@ def main():
         return
     uni = build_universe()
     print(f"universe ({len(uni)}): {' '.join(uni)}")
+    def audit(note):
+        print(note)
+        if not DRY_RUN:
+            sb_post("screener_log", [{"source": "scan_universe", "verdict": None, "note": note}])
+    if not uni:
+        audit("universe 0 - all preset names are active or under live candidates"); return
     smh_rets = log_rets(closes_from_marks("SMH"))
     survivors = []
     for tk in uni:
@@ -203,7 +213,7 @@ def main():
             print(f"  {tk}: data FAIL {e}")
     print(f"prefilter kept {len(survivors)}: {' '.join(t for t,_,_ in survivors)}")
     if not survivors:
-        print("nothing to scan today."); return
+        audit(f"universe {len(uni)}, prefiltered 0 - nothing to scan today"); return
     today = dt.date.today()
     out = []
     for i in range(0, len(survivors), BATCH):
@@ -242,8 +252,7 @@ def main():
     if DRY_RUN:
         print("DRY_RUN - would insert:"); print(json.dumps(rows, indent=1)); print(summary); return
     if rows: sb_post("screener_suggestions", rows)
-    sb_post("screener_log", [{"source": "scan_universe", "verdict": None, "note": summary}])
-    print(f"inserted {len(rows)} suggestion(s). {summary}")
+    audit(f"inserted {len(rows)} suggestion(s). {summary}")
 
 if __name__ == "__main__":
     main()

@@ -61,7 +61,7 @@ def main():
         mm = last_marks(t)
         m = mm[0] if mm else None
         if not m:
-            hits.append((f"[alert] {t}: no price data",
+            hits.append((f"[alert] {t} no-data",
                          f"Active {st} row but no price_marks rows."))
             continue
         px   = float(m["price"])
@@ -74,29 +74,29 @@ def main():
                          f"Verify split/corporate action or bad print. "
                          f"Level alerts suppressed for this ticker until the feed is confirmed."))
         if (today - mark).days > STALE_DAYS:
-            hits.append((f"[alert] {t}: stale price feed",
+            hits.append((f"[alert] {t} stale-feed",
                          f"Latest mark {px} is from {mark} - pipeline may be down."))
             continue
 
         entry, stop, target = s.get("entry"), s.get("stop"), s.get("target")
         if not gated and st == "watch" and entry is not None and lo * (px - float(entry)) > 0:
-            hits.append((f"[alert] {t} closed through entry {float(entry):g}",
+            hits.append((f"[alert] {t} entry-hit {float(entry):g}",
                          f"{t} closed {px} on {mark}, through entry {float(entry):g} "
                          f"(setup {s.get('setup_type')}, {s.get('confluence')}/5). "
                          f"Close-confirmed. Flip status to triggered if taken."))
         if not gated and stop is not None and lo * (float(stop) - px) > 0:
-            hits.append((f"[alert] {t} closed through stop {float(stop):g}",
+            hits.append((f"[alert] {t} " + ("stop-breach" if st == "triggered" else "invalidated-through-stop") + f" {float(stop):g}",
                          f"{t} closed {px} on {mark}, through stop {float(stop):g} "
                          f"(status {st}). Close-confirmed - "
                          f"{'invalidation' if st == 'watch' else 'exit'} signal."))
         if not gated and st == "triggered" and target is not None and lo * (px - float(target)) > 0:
-            hits.append((f"[alert] {t} closed through target {float(target):g}",
+            hits.append((f"[alert] {t} target-hit {float(target):g}",
                          f"{t} closed {px} on {mark}, beyond target {float(target):g}."))
         ev = s.get("event_date")
         if ev:
             days = (dt.date.fromisoformat(ev) - today).days
             if 0 <= days <= WARN_DAYS:
-                hits.append((f"[alert] {t} binary event {ev}",
+                hits.append((f"[alert] {t} binary-event {ev}",
                              f"{t} event in {days} day(s). Earnings-veto rule: "
                              f"trim/exit before, don't hold through."))
 
